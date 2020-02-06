@@ -101,4 +101,11 @@ permanova_s17 <-
 capture.output(permanova_s17, file = "permanova.txt")
 
 
-# Family level abundances
+#############
+# Abundance #
+#############
+
+# Import into Phyloseq
+ps_taxonomy <- tax_table(as.matrix(hsm_16s_taxonomy))
+ps_metadata <- sample_data(hsm_16s_metadata)
+ps_otu_table <- otu_table(hsm_otu_table, taxa_are_rows = FALSE)
