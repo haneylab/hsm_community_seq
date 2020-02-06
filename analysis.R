@@ -106,6 +106,16 @@ capture.output(permanova_s17, file = "permanova.txt")
 #############
 
 # Import into Phyloseq
+## Convert tables to phyloseq class
 ps_taxonomy <- tax_table(as.matrix(hsm_16s_taxonomy))
 ps_metadata <- sample_data(hsm_16s_metadata)
 ps_otu_table <- otu_table(hsm_otu_table, taxa_are_rows = FALSE)
+
+## Set consistent names
+taxa_names(ps_taxonomy) <- hsm_16s_taxonomy$Feature.ID
+sample_names(ps_metadata) <- hsm_16s_metadata$sample_name
+
+## Merge into one phyloseq object
+hsm_phyloseq <- phyloseq(ps_taxonomy, ps_metadata, ps_otu_table)
+
+
