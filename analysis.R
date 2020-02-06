@@ -14,12 +14,18 @@ library(DESeq2)
 library(cowplot)
 
 # Set working directory
-setwd(".")
+setwd("./compbio/hsm_community_seq/")
 # Load data
 hsm_otu_table <- read.table("otu_table.tsv", header = TRUE, sep = "\t")
 hsm_16s_metadata <- read.csv("metadata.csv")
 hsm_16s_taxonomy <- read.table("taxonomy.tsv", header = TRUE, sep = "\t")
 condition_of_interest <- c("BS", "HSM", "Col0", "W.Col0")
+
+## Fix Taxonomy file
+hsm_16s_taxonomy$Taxon <- str_replace_all(hsm_16s_taxonomy$Taxon,  "[a-z]__", "")
+hsm_16s_taxonomy <- separate(hsm_16s_taxonomy, col = Taxon, into = c("k","p","c","o","f","g","s"))%>%
+  replace_na(list(k="",p="",c="",o="",f="",g="",s=""))
+
 #############
 # Diversity #
 #############
@@ -47,9 +53,10 @@ alpha_diversity <- data.frame("sample_name" = s17_samples,
   inner_join(hsm_16s_metadata)
 
 
-alpha_diversity_plot <- ggplot(alpha_diversity, aes(condition, index, fill = soil))+
+alpha_diversity_plot <- ggplot(alpha_diversity, aes(condition, index))+
   facet_wrap(.~ metric, scales = "free")+
-  geom_boxplot()
+  geom_boxplot()+
+  theme_cowplot()
 
 alpha_diversity_plot
 
@@ -60,8 +67,9 @@ s17_mds$sample_name <- s17_samples
 s17_mds <- inner_join(hsm_16s_metadata, s17_mds)
 ## Plot S17 MDS
 s17_mds_plot <- ggplot(s17_mds, aes(MDS1, MDS2, colour = condition))+
-  geom_point()+
-  coord_fixed()
+  geom_point(size = 2.5)+
+  coord_fixed()+
+  theme_cowplot()
 s17_mds_plot
 
 ## Run PERMANOVA for each MDS plot
