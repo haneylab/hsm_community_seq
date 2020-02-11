@@ -9,8 +9,6 @@
 # Load packages
 library(tidyverse)
 library(vegan)
-library(phyloseq)
-library(DESeq2)
 library(cowplot)
 
 # Set working directory
@@ -105,17 +103,22 @@ capture.output(permanova_s17, file = "permanova.txt")
 # Abundance #
 #############
 
-# Import into Phyloseq
-## Convert tables to phyloseq class
-ps_taxonomy <- tax_table(as.matrix(hsm_16s_taxonomy))
-ps_metadata <- sample_data(hsm_16s_metadata)
-ps_otu_table <- otu_table(hsm_otu_table, taxa_are_rows = FALSE)
+hsm_otus_with_tax <- t(hsm_otu_table)
+hsm_otus_with_tax <- as.data.frame(vegan::decostand(hsm_otus_with_tax, method = "total",2))
+hsm_otus_with_tax$Feature.ID <- rownames(hsm_otus_with_tax)
+hsm_otus_with_tax <- inner_join(hsm_otus_with_tax, hsm_16s_taxonomy)%>%
+  pivot_longer(cols = 1:76, names_to = "sample_name", values_to = "abundance")%>%
+  inner_join(hsm_16s_metadata)
 
-## Set consistent names
-taxa_names(ps_taxonomy) <- hsm_16s_taxonomy$Feature.ID
-sample_names(ps_metadata) <- hsm_16s_metadata$sample_name
 
-## Merge into one phyloseq object
-hsm_phyloseq <- phyloseq(ps_taxonomy, ps_metadata, ps_otu_table)
+plot_family <- function(family, conditions = condition_of_interest, soil = "s17"){
+    subset_df <- filter(hsm_otus_with_tax, f == family & condition %in% conditions & soil == "s17")%>%
+    group_by(sample_name, condition)%>%
+    summarize(ag_abundance = sum(abundance))
+    capture.output(t.test(ag_abundance ~ condition, data = subset_df), file = paste0("output/", family, ".ttest.txt"))
+    write_csv(subset_df, path = paste0("output/", family, "abundances.csv"))
+  }
 
+
+plot_family("Acidobacteriaceae", conditions = c("Col0", "HSM"))
 
