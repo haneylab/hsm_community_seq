@@ -11,15 +11,17 @@ library(tidyverse)
 library(vegan)
 library(ape)
 library(cowplot)
+library(phyloseq)
+library(DESeq2)
 
 # Set working directory
 setwd("./compbio/hsm_community_seq/")
 # Load data
 hsm_otu_table <-
-  read.table("otu_table.tsv", header = TRUE, sep = "\t")
-hsm_16s_metadata <- read.csv("metadata.csv")
+  read.table("data/otu_table.tsv", header = TRUE, sep = "\t")
+hsm_16s_metadata <- read.csv("data/metadata.csv")
 hsm_16s_taxonomy <-
-  read.table("taxonomy.tsv", header = TRUE, sep = "\t")
+  read.table("data/taxonomy.tsv", header = TRUE, sep = "\t")
 
 condition_of_interest <- c("BS", "HSM", "Col0")
 
@@ -58,6 +60,7 @@ endosymbionts <- filter(hsm_16s_taxonomy, c == "Chloroplast" | f == "mitochondri
 
 hsm_otu_table <- filter(hsm_otu_table, !(OTU_ID %in% endosymbionts$Feature.ID))
 rownames(hsm_otu_table) <- hsm_otu_table$OTU_ID
+
 ## Create master dataframe with all data
 hsm_otus_with_tax <- hsm_otu_table[,-1]
 hsm_otus_with_tax <-
@@ -75,14 +78,15 @@ hsm_otus_with_tax <-
 #############
 # Diversity #
 #############
+# Prepare Data
 
-# Rarefy OTUs for diversity measurements
+## Rarefy OTUs for diversity measurements
 otu_names <- as.character(hsm_otu_table$OTU_ID)
 hsm_otu_table <- data.frame(t(hsm_otu_table[, -1]))
 colnames(hsm_otu_table) <- otu_names
 hsm_otus_rarified <- data.frame(rrarefy(hsm_otu_table, 11095))
 
-# Separate samples by soil type
+## Separate samples by soil type
 s17_samples <-
   as.character(hsm_16s_metadata$sample_name[hsm_16s_metadata$soil == "s17" &
                                               hsm_16s_metadata$condition %in% condition_of_interest])
@@ -95,38 +99,37 @@ hsm_otus_rarified <- s17_rarified_otus
 s17_unrarified_otus <-
   filter(hsm_otu_table, rownames(hsm_otu_table) %in% s17_samples)
 
-# Alpha Diversity measurements
+# Alpha diversity 
+## Calculate indices in vegan
 alpha_diversity <- data.frame(
   "sample_name" = s17_samples,
   "inverse_simpsons" = diversity(hsm_otus_rarified, "invsimpson", MARGIN = 1),
   "shannon" = diversity(hsm_otus_rarified, MARGIN = 1),
   "chao1" = estimateR(hsm_otus_rarified)[2,]
 ) %>%
-  gather(key = "metric", value = "index",-1) %>%
   inner_join(hsm_16s_metadata)
 
-
+## Plot alpha diversity
 alpha_diversity_plot <-
-  ggplot(alpha_diversity, aes(condition, index)) +
-  facet_wrap(. ~ metric, scales = "free") +
+  gather(alpha_diversity, key = "index", value = "value", 2:4) %>%
+  ggplot(aes(condition, value)) + 
+  facet_wrap(. ~ index, scales = "free") +
   geom_boxplot() +
   theme_cowplot()
 
-ggsave(plot = alpha_diversity_plot, "alpha_diversity.pdf")
+ggsave(plot = alpha_diversity_plot, "output/alpha_diversity.pdf")
 
-# NMDS/PCoA of Bray-Curtis dissimilarity
-## Run MDS on S17 samples
-s17_mds <- data.frame(metaMDS(s17_rarified_otus)$points)
-s17_mds$sample_name <- s17_samples
-s17_mds <- inner_join(hsm_16s_metadata, s17_mds)
-## Plot S17 MDS
-s17_mds_plot <-
-  ggplot(s17_mds, aes(MDS1, MDS2, colour = condition)) +
-  geom_point(size = 2.5) +
-  coord_fixed() +
-  theme_cowplot()
-ggsave(plot = s17_mds_plot, "nmds.pdf")
+## Alpha diversity stats
+chao_pvals <- broom::tidy(TukeyHSD(aov(chao1 ~ condition, data = alpha_diversity)))
+shannon_pvals <- broom::tidy(TukeyHSD(aov(shannon ~ condition, data = alpha_diversity)))
+invsimp_pvals <- broom::tidy(TukeyHSD(aov(inverse_simpsons ~ condition, data = alpha_diversity)))
+write_csv(data.frame("comparison" = chao_pvals$comparison,
+                     "chao" = chao_pvals$adj.p.value,
+                     "shannon" = shannon_pvals$adj.p.value,
+                     "inv_simpsons" = invsimp_pvals$adj.p.value),
+          path = "output/alpha_diversity_pvals.csv")
 
+# Beta diversity
 ## Run PCoA
 s17_dist <- vegdist(s17_rarified_otus, "bray")
 s17_pcoa <- pcoa(s17_dist)
@@ -144,15 +147,15 @@ s17_pcoa_plot <-
   ylab(paste0("PC2", " (", round(axis_names[2] * 100, digits = 2), "%)")) +
   theme_cowplot()
 
-ggsave(plot = s17_pcoa_plot, "pcoa.pdf")
+ggsave(plot = s17_pcoa_plot, "output/pcoa.pdf")
 
 ## Run PERMANOVA for each MDS plot
 permanova_s17 <-
   adonis(s17_rarified_otus ~ condition, data = s17_pcoa_df)
-capture.output(permanova_s17, file = "permanova_pcoa.txt")
+capture.output(permanova_s17, file = "output/permanova_pcoa.txt")
 
 
-# Phylum-Level Bar Chart
+## Phylum-Level Bar Chart
 phylum_chart_df <- hsm_otus_with_tax %>%
   group_by(sample_name, plot_ranks, soil, condition)%>%
   summarize(abundance = sum(abundance))%>%
@@ -181,28 +184,4 @@ phylum_chart <- ggplot(phylum_chart_df, aes(x = sample_name, y = abundance, fill
   scale_y_continuous(name = "Relative Abundance")+
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
-ggsave(plot = phylum_chart, "phylum_bar_chart.pdf")
-
-## Code for multiple t tests goes here
-
-#############
-# Abundance #
-#############
-
-
-plot_family <-
-  function(family,
-           conditions = condition_of_interest,
-           soil = "s17") {
-    subset_df <-
-      filter(hsm_otus_with_tax,
-             f == family &
-               condition %in% conditions & soil == "s17") %>%
-      group_by(sample_name, condition) %>%
-      summarize(ag_abundance = sum(abundance))
-    capture.output(
-      t.test(ag_abundance ~ condition, data = subset_df),
-      file = paste0("output/", family, ".ttest.txt")
-    )
-    write_csv(subset_df, path = paste0("output/", family, "_abundances.csv"))
-  }
+ggsave(plot = phylum_chart, "output/phylum_bar_chart.pdf")
