@@ -185,3 +185,51 @@ phylum_chart <- ggplot(phylum_chart_df, aes(x = sample_name, y = abundance, fill
   theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 
 ggsave(plot = phylum_chart, "output/phylum_bar_chart.pdf")
+
+##########
+# DESeq2 #
+##########
+
+#Taxonomy Table
+hsm_tax_ps <- as.matrix(hsm_16s_taxonomy[-1])
+rownames(hsm_tax_ps) <- hsm_16s_taxonomy$Feature.ID
+hsm_tax_ps <- tax_table(hsm_tax_ps)
+
+#OTU Table
+hsm_otus_ps <- otu_table(hsm_otu_table, taxa_are_rows = FALSE)
+
+#Metadata
+rownames(hsm_16s_metadata) <- hsm_16s_metadata$sample_name
+hsm_metadata_ps <- sample_data(hsm_16s_metadata)
+
+# Merge phyloseq object
+hsm_ps <- phyloseq(tax_table=hsm_tax_ps,
+                   sample_data=hsm_metadata_ps,
+                   otu_table=hsm_otus_ps)
+# Agglomerate at family level
+hsm_ps <- tax_glom(hsm_ps, taxrank = "f")
+
+# Run DESeq2
+hsm_dds <- phyloseq_to_deseq2(hsm_ps, ~condition)
+hsm_dds$condition <- relevel(hsm_dds$condition, ref = "Col0")
+hsm_dds <- DESeq(hsm_dds)
+deseq_results <- results(hsm_dds, name = "condition_HSM_vs_Col0", alpha = 0.05)
+
+# 
+hsm_da_families <- as.data.frame(deseq_results)
+hsm_da_families$Feature.ID <- rownames(hsm_da_families)
+hsm_da_families <- inner_join(hsm_da_families, hsm_16s_taxonomy)%>%
+  transform(f = reorder(f, log2FoldChange))%>%
+  filter(padj < 0.1)
+
+da_taxa_plot <- ggplot(hsm_da_families, aes(x = log2FoldChange, y = f, colour = plot_ranks, size = -padj))+
+  geom_point()+
+  geom_vline(xintercept = 0)+
+  scale_size_continuous(name = "padj", limits = c(-0.1, 0), labels = c(0.100, 0.075, 0.050, 0.025, 0.000))+
+  theme(axis.title.y=element_blank())
+
+da_taxa_plot
+ggsave(plot = da_taxa_plot, "output/differential_taxa.pdf")
+
+write_csv(hsm_da_families, "output/deseq_results.csv")
+
