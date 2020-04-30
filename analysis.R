@@ -15,7 +15,7 @@ library(phyloseq)
 library(DESeq2)
 
 # Set working directory
-setwd("./compbio/hsm_community_seq/")
+setwd("~/compbio/hsm_community_seq/")
 # Load data
 hsm_otu_table <-
   read.table("data/otu_table.tsv", header = TRUE, sep = "\t")
@@ -63,14 +63,10 @@ rownames(hsm_otu_table) <- hsm_otu_table$OTU_ID
 
 ## Create master dataframe with all data
 hsm_otus_with_tax <- hsm_otu_table[,-1]
-hsm_otus_with_tax <-
-  as.data.frame(vegan::decostand(hsm_otus_with_tax, method = "total", 2))
+hsm_otus_with_tax <- as.data.frame(vegan::decostand(hsm_otus_with_tax, method = "total", 2))
 hsm_otus_with_tax$Feature.ID <- rownames(hsm_otus_with_tax)
-hsm_otus_with_tax <-
-  inner_join(hsm_otus_with_tax, hsm_16s_taxonomy) %>%
-  pivot_longer(cols = 1:76,
-               names_to = "sample_name",
-               values_to = "abundance") %>%
+hsm_otus_with_tax <- inner_join(hsm_otus_with_tax, hsm_16s_taxonomy) %>%
+  pivot_longer(cols = 1:76, names_to = "sample_name", values_to = "abundance") %>%
   inner_join(hsm_16s_metadata)
 
 
@@ -207,7 +203,8 @@ hsm_ps <- phyloseq(tax_table=hsm_tax_ps,
                    sample_data=hsm_metadata_ps,
                    otu_table=hsm_otus_ps)
 # Agglomerate at family level
-hsm_ps <- tax_glom(hsm_ps, taxrank = "f")
+hsm_ps <- tax_glom(hsm_ps, taxrank = "f")%>%
+  phyloseq::subset_samples(soil == "s17")
 
 # Run DESeq2
 hsm_dds <- phyloseq_to_deseq2(hsm_ps, ~condition)
@@ -215,21 +212,27 @@ hsm_dds$condition <- relevel(hsm_dds$condition, ref = "Col0")
 hsm_dds <- DESeq(hsm_dds)
 deseq_results <- results(hsm_dds, name = "condition_HSM_vs_Col0", alpha = 0.05)
 
-# 
+# DESeq Results formatting
 hsm_da_families <- as.data.frame(deseq_results)
 hsm_da_families$Feature.ID <- rownames(hsm_da_families)
 hsm_da_families <- inner_join(hsm_da_families, hsm_16s_taxonomy)%>%
   transform(f = reorder(f, log2FoldChange))%>%
   filter(padj < 0.1)
 
-da_taxa_plot <- ggplot(hsm_da_families, aes(x = log2FoldChange, y = f, colour = plot_ranks, size = -padj))+
+hsm_da_families$plot_ranks <- factor(hsm_da_families$plot_ranks, levels = c(
+  "Acidobacteria", "Actinobacteria", "Bacteroidetes","Cyanobacteria", "Firmicutes",
+  "Gemmatimonadetes", "Planctomycetes", "Alphaproteobacteria", "Betaproteobacteria",
+  "Deltaproteobacteria", "Gammaproteobacteria", "Verrucomicrobia", "Chloroflexi"))
+
+# Plot DA taxa bubble plot
+da_taxa_plot <- ggplot(hsm_da_families, aes(x = log2FoldChange, y = f, colour = plot_ranks, size = -log10(padj)))+
   geom_point()+
   geom_vline(xintercept = 0)+
-  scale_size_continuous(name = "padj", limits = c(-0.1, 0), labels = c(0.100, 0.075, 0.050, 0.025, 0.000))+
   theme(axis.title.y=element_blank())
 
 da_taxa_plot
+
 ggsave(plot = da_taxa_plot, "output/differential_taxa.pdf")
 
+# Write DESeq Results to csv
 write_csv(hsm_da_families, "output/deseq_results.csv")
-
